@@ -1,4 +1,4 @@
-export type BlockchainNetwork = 'Ethereum' | 'Sepolia' | 'Base' | 'Arbitrum';
+export type BlockchainNetwork = 'Ethereum' | 'Sepolia' | 'Base' | 'Arbitrum' | 'Polygon';
 
 export type ArtworkMedium = 'Generative Code' | 'Architectural 3D' | 'Digital Sculpture' | 'Algorithmic' | 'Audiovisual' | 'Minimalist 3D';
 
@@ -122,8 +122,10 @@ export interface UserWallet {
   balanceETH: number;
   balanceUSD: number;
   network: BlockchainNetwork;
+  chainId?: string;
   connected: boolean;
-  walletType: 'MetaMask' | 'Coinbase' | 'Phantom' | 'WalletConnect' | null;
+  isRealProvider?: boolean;
+  walletType: 'MetaMask' | 'Coinbase' | 'Phantom' | 'Rabby' | 'Rainbow' | 'Injected' | 'WalletConnect' | 'Demo' | null;
   collectedNFTs: NFTArtwork[];
   createdNFTs: NFTArtwork[];
   activeBids: {

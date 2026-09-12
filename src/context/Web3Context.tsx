@@ -26,6 +26,16 @@ interface ToastNotification {
   timestamp: number;
 }
 
+export type WalletType =
+  | 'MetaMask'
+  | 'Coinbase'
+  | 'Phantom'
+  | 'Rabby'
+  | 'Rainbow'
+  | 'Injected'
+  | 'WalletConnect'
+  | 'Demo';
+
 interface Web3ContextType {
   wallet: UserWallet;
   artworks: NFTArtwork[];
@@ -38,9 +48,9 @@ interface Web3ContextType {
   activeTxDetails: { title: string; subtitle?: string; step: 'signature' | 'confirming' | 'success' } | null;
   openWalletModal: () => void;
   closeWalletModal: () => void;
-  connectWallet: (type: 'MetaMask' | 'Coinbase' | 'Phantom' | 'WalletConnect') => Promise<void>;
+  connectWallet: (type: WalletType) => Promise<boolean>;
   disconnectWallet: () => void;
-  switchNetwork: (network: BlockchainNetwork) => void;
+  switchNetwork: (network: BlockchainNetwork) => Promise<void>;
   adjustBalance: (newBalance: number) => void;
   collectArtwork: (artworkId: string) => Promise<{ success: boolean; txHash?: string }>;
   placeBid: (artworkId: string, amount: number) => Promise<{ success: boolean; txHash?: string }>;
@@ -58,7 +68,59 @@ interface Web3ContextType {
     attributes: { trait_type: string; value: string }[];
   }) => Promise<{ success: boolean; artworkId: string; txHash: string }>;
   dismissToast: (id: string) => void;
+  isExtensionDetected: (type: WalletType) => boolean;
 }
+
+const CHAIN_IDS: { [key in BlockchainNetwork]: string } = {
+  Ethereum: '0x1',
+  Sepolia: '0xaa36a7',
+  Base: '0x2105',
+  Arbitrum: '0xa4b1',
+  Polygon: '0x89'
+};
+
+const CHAIN_ID_TO_NETWORK: { [key: string]: BlockchainNetwork } = {
+  '0x1': 'Ethereum',
+  '0xaa36a7': 'Sepolia',
+  '11155111': 'Sepolia',
+  '0x2105': 'Base',
+  '8453': 'Base',
+  '0xa4b1': 'Arbitrum',
+  '42161': 'Arbitrum',
+  '0x89': 'Polygon',
+  '137': 'Polygon'
+};
+
+const NETWORK_PARAMS: { [key in BlockchainNetwork]?: any } = {
+  Sepolia: {
+    chainId: '0xaa36a7',
+    chainName: 'Sepolia Test Network',
+    nativeCurrency: { name: 'Sepolia ETH', symbol: 'SEP', decimals: 18 },
+    rpcUrls: ['https://rpc.sepolia.org'],
+    blockExplorerUrls: ['https://sepolia.etherscan.io']
+  },
+  Base: {
+    chainId: '0x2105',
+    chainName: 'Base Mainnet',
+    nativeCurrency: { name: 'Ethereum', symbol: 'ETH', decimals: 18 },
+    rpcUrls: ['https://mainnet.base.org'],
+    blockExplorerUrls: ['https://basescan.org']
+  },
+  Arbitrum: {
+    chainId: '0xa4b1',
+    chainName: 'Arbitrum One',
+    nativeCurrency: { name: 'Ethereum', symbol: 'ETH', decimals: 18 },
+    rpcUrls: ['https://arb1.arbitrum.io/rpc'],
+    blockExplorerUrls: ['https://arbiscan.io']
+  },
+  Polygon: {
+    chainId: '0x89',
+    chainName: 'Polygon Mainnet',
+    nativeCurrency: { name: 'POL', symbol: 'POL', decimals: 18 },
+    rpcUrls: ['https://polygon-rpc.com/'],
+    blockExplorerUrls: ['https://polygonscan.com']
+  }
+};
 
 const DEFAULT_WALLET: UserWallet = {
   address: '0x82f9A1394C01e0D642aFE5698b6a12C57B4A491A',
@@ -67,6 +129,7 @@ const DEFAULT_WALLET: UserWallet = {
   balanceUSD: 6.85 * ETH_PRICE_USD,
   network: 'Ethereum',
   connected: false,
+  isRealProvider: false,
   walletType: null,
   collectedNFTs: [],
   createdNFTs: [],
@@ -112,6 +175,47 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
     step: 'signature' | 'confirming' | 'success';
   } | null>(null);
 
+  // Helper to detect specific provider
+  const getProvider = (type: WalletType): any => {
+    if (typeof window === 'undefined') return null;
+    const anyWindow = window as any;
+
+    if (type === 'Coinbase') {
+      return anyWindow.coinbaseWalletExtension || (anyWindow.ethereum?.isCoinbaseWallet ? anyWindow.ethereum : null);
+    }
+    if (type === 'Phantom') {
+      return anyWindow.phantom?.ethereum || anyWindow.phantom?.solana || (anyWindow.ethereum?.isPhantom ? anyWindow.ethereum : null);
+    }
+    if (type === 'Rabby') {
+      return anyWindow.ethereum?.isRabby ? anyWindow.ethereum : null;
+    }
+    if (type === 'Rainbow') {
+      return anyWindow.ethereum?.isRainbow ? anyWindow.ethereum : null;
+    }
+    if (type === 'MetaMask') {
+      if (anyWindow.ethereum?.providers) {
+        return anyWindow.ethereum.providers.find((p: any) => p.isMetaMask) || anyWindow.ethereum;
+      }
+      return anyWindow.ethereum?.isMetaMask ? anyWindow.ethereum : anyWindow.ethereum;
+    }
+    if (type === 'Injected') {
+      return anyWindow.ethereum;
+    }
+    return anyWindow.ethereum || null;
+  };
+
+  const isExtensionDetected = (type: WalletType): boolean => {
+    if (typeof window === 'undefined') return false;
+    const anyWindow = window as any;
+    if (type === 'MetaMask') return !!(anyWindow.ethereum?.isMetaMask || anyWindow.ethereum);
+    if (type === 'Coinbase') return !!(anyWindow.coinbaseWalletExtension || anyWindow.ethereum?.isCoinbaseWallet);
+    if (type === 'Phantom') return !!(anyWindow.phantom?.ethereum || anyWindow.phantom?.solana || anyWindow.ethereum?.isPhantom);
+    if (type === 'Rabby') return !!anyWindow.ethereum?.isRabby;
+    if (type === 'Rainbow') return !!anyWindow.ethereum?.isRainbow;
+    if (type === 'Injected') return !!anyWindow.ethereum;
+    return false;
+  };
+
   // Sync to local storage
   useEffect(() => {
     localStorage.setItem('arcvault_wallet', JSON.stringify(wallet));
@@ -125,6 +229,64 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
     localStorage.setItem('arcvault_drops', JSON.stringify(drops));
   }, [drops]);
 
+  // Handle provider events (account change, network change)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const ethereum = (window as any).ethereum;
+
+    if (ethereum && wallet.connected && wallet.isRealProvider) {
+      const handleAccountsChanged = async (accounts: string[]) => {
+        if (accounts.length === 0) {
+          disconnectWallet();
+        } else {
+          const address = accounts[0];
+          const shortAddress = `${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
+          let balanceETH = wallet.balanceETH;
+          try {
+            const balHex = await ethereum.request({ method: 'eth_getBalance', params: [address, 'latest'] });
+            balanceETH = Number((parseInt(balHex, 16) / 1e18).toFixed(4));
+          } catch (e) {}
+
+          setWallet((prev) => ({
+            ...prev,
+            address,
+            shortAddress,
+            balanceETH: balanceETH > 0 ? balanceETH : prev.balanceETH,
+            balanceUSD: (balanceETH > 0 ? balanceETH : prev.balanceETH) * ETH_PRICE_USD
+          }));
+
+          addToast({
+            type: 'info',
+            title: 'Account Switched',
+            message: `Active address changed to ${shortAddress}`
+          });
+        }
+      };
+
+      const handleChainChanged = (chainIdHex: string) => {
+        const net = CHAIN_ID_TO_NETWORK[chainIdHex.toLowerCase()] || 'Ethereum';
+        setWallet((prev) => ({
+          ...prev,
+          network: net,
+          chainId: chainIdHex
+        }));
+        addToast({
+          type: 'info',
+          title: 'Network Updated',
+          message: `Wallet switched to ${net}`
+        });
+      };
+
+      ethereum.on?.('accountsChanged', handleAccountsChanged);
+      ethereum.on?.('chainChanged', handleChainChanged);
+
+      return () => {
+        ethereum.removeListener?.('accountsChanged', handleAccountsChanged);
+        ethereum.removeListener?.('chainChanged', handleChainChanged);
+      };
+    }
+  }, [wallet.connected, wallet.isRealProvider]);
+
   const addToast = (toast: Omit<ToastNotification, 'id' | 'timestamp'>) => {
     const id = Math.random().toString(36).substring(2, 9);
     const newToast: ToastNotification = {
@@ -133,8 +295,6 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
       timestamp: Date.now()
     };
     setToasts((prev) => [newToast, ...prev.slice(0, 4)]);
-
-    // Auto dismiss after 6 seconds
     setTimeout(() => {
       dismissToast(id);
     }, 6000);
@@ -147,56 +307,159 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const openWalletModal = () => setIsWalletModalOpen(true);
   const closeWalletModal = () => setIsWalletModalOpen(false);
 
-  const connectWallet = async (type: 'MetaMask' | 'Coinbase' | 'Phantom' | 'WalletConnect') => {
+  // Connect to Extension or Demo
+  const connectWallet = async (type: WalletType): Promise<boolean> => {
     setIsTxProcessing(true);
     setActiveTxDetails({
       title: `Connecting to ${type}`,
-      subtitle: 'Requesting account authorization & signature...',
+      subtitle: 'Requesting permission from your browser extension / app...',
       step: 'signature'
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 900));
+    try {
+      const provider = getProvider(type);
 
-    const address = '0x82f9A1394C01e0D642aFE5698b6a12C57B4A491A';
-    setWallet((prev) => ({
-      ...prev,
-      connected: true,
-      walletType: type,
-      address,
-      shortAddress: `${address.substring(0, 6)}...${address.substring(address.length - 4)}`,
-      balanceETH: prev.balanceETH > 0 ? prev.balanceETH : 6.85,
-      balanceUSD: (prev.balanceETH > 0 ? prev.balanceETH : 6.85) * ETH_PRICE_USD
-    }));
+      if (type !== 'Demo' && type !== 'WalletConnect' && provider) {
+        // Real Injected Extension Connection (MetaMask, Coinbase, Phantom, Rabby, etc.)
+        const accounts: string[] = await provider.request({ method: 'eth_requestAccounts' });
 
-    setIsTxProcessing(false);
-    setActiveTxDetails(null);
-    closeWalletModal();
+        if (!accounts || accounts.length === 0) {
+          throw new Error('No accounts authorized');
+        }
 
-    addToast({
-      type: 'success',
-      title: 'Wallet Connected',
-      message: `Successfully connected with ${type} on ${wallet.network}`
-    });
+        const address = accounts[0];
+        const shortAddress = `${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
+
+        // Fetch chain ID
+        let currentNet: BlockchainNetwork = 'Ethereum';
+        try {
+          const chainIdHex = await provider.request({ method: 'eth_chainId' });
+          if (CHAIN_ID_TO_NETWORK[chainIdHex.toLowerCase()]) {
+            currentNet = CHAIN_ID_TO_NETWORK[chainIdHex.toLowerCase()];
+          }
+        } catch (e) {}
+
+        // Fetch actual ETH balance
+        let balanceETH = 4.5;
+        try {
+          const balHex = await provider.request({ method: 'eth_getBalance', params: [address, 'latest'] });
+          const parsed = parseInt(balHex, 16) / 1e18;
+          if (!isNaN(parsed) && parsed > 0) {
+            balanceETH = Number(parsed.toFixed(4));
+          }
+        } catch (e) {}
+
+        setWallet((prev) => ({
+          ...prev,
+          connected: true,
+          isRealProvider: true,
+          walletType: type,
+          address,
+          shortAddress,
+          network: currentNet,
+          balanceETH,
+          balanceUSD: Number((balanceETH * ETH_PRICE_USD).toFixed(2))
+        }));
+
+        setIsTxProcessing(false);
+        setActiveTxDetails(null);
+        closeWalletModal();
+
+        addToast({
+          type: 'success',
+          title: `${type} Connected`,
+          message: `Verified on-chain session established with ${shortAddress}`
+        });
+
+        return true;
+      } else {
+        // Demo Vault Session / Simulation Mode or WalletConnect QR
+        await new Promise((resolve) => setTimeout(resolve, 800));
+
+        const demoAddress = '0x82f9A1394C01e0D642aFE5698b6a12C57B4A491A';
+        setWallet((prev) => ({
+          ...prev,
+          connected: true,
+          isRealProvider: false,
+          walletType: type,
+          address: demoAddress,
+          shortAddress: '0x82f9...491A',
+          balanceETH: prev.balanceETH > 0 ? prev.balanceETH : 6.85,
+          balanceUSD: (prev.balanceETH > 0 ? prev.balanceETH : 6.85) * ETH_PRICE_USD
+        }));
+
+        setIsTxProcessing(false);
+        setActiveTxDetails(null);
+        closeWalletModal();
+
+        addToast({
+          type: 'success',
+          title: `${type === 'Demo' ? 'Vault Session Active' : `${type} Connected`}`,
+          message: 'Ready to mint, collect, and bid on ARCVAULT.'
+        });
+
+        return true;
+      }
+    } catch (err: any) {
+      console.warn('Wallet connection cancelled or failed', err);
+      setIsTxProcessing(false);
+      setActiveTxDetails(null);
+
+      // Fallback: If user rejects or has no extension, notify and offer simulation
+      addToast({
+        type: 'warning',
+        title: 'Connection Notice',
+        message: err.message || 'Extension connection cancelled. You can also connect via Simulated Vault.'
+      });
+      return false;
+    }
   };
 
   const disconnectWallet = () => {
     setWallet((prev) => ({
       ...prev,
       connected: false,
+      isRealProvider: false,
       walletType: null
     }));
     addToast({
       type: 'info',
       title: 'Wallet Disconnected',
-      message: 'Your Web3 session has been securely ended.'
+      message: 'Your Web3 keypair session has been securely closed.'
     });
   };
 
-  const switchNetwork = (network: BlockchainNetwork) => {
+  // Switch network with real extension request
+  const switchNetwork = async (network: BlockchainNetwork) => {
+    const targetChainId = CHAIN_IDS[network];
+
+    if (wallet.isRealProvider && typeof window !== 'undefined' && (window as any).ethereum) {
+      const provider = (window as any).ethereum;
+      try {
+        await provider.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: targetChainId }]
+        });
+      } catch (switchError: any) {
+        // Error 4902 indicates chain hasn't been added to wallet yet
+        if (switchError.code === 4902 && NETWORK_PARAMS[network]) {
+          try {
+            await provider.request({
+              method: 'wallet_addEthereumChain',
+              params: [NETWORK_PARAMS[network]]
+            });
+          } catch (addError) {
+            console.error('Failed to add chain', addError);
+          }
+        }
+      }
+    }
+
     setWallet((prev) => ({
       ...prev,
       network
     }));
+
     addToast({
       type: 'info',
       title: 'Network Switched',
@@ -210,6 +473,35 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
       balanceETH: Math.max(0, newBalance),
       balanceUSD: Math.max(0, newBalance) * ETH_PRICE_USD
     }));
+  };
+
+  // Cryptographic Signature Request Helper
+  const requestCryptographicSignature = async (message: string): Promise<boolean> => {
+    if (wallet.isRealProvider && typeof window !== 'undefined' && (window as any).ethereum) {
+      const provider = (window as any).ethereum;
+      try {
+        const msgHex = '0x' + Array.from(new TextEncoder().encode(message))
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join('');
+        await provider.request({
+          method: 'personal_sign',
+          params: [msgHex, wallet.address]
+        });
+        return true;
+      } catch (err) {
+        console.warn('Signature rejected by user', err);
+        addToast({
+          type: 'warning',
+          title: 'Signature Rejected',
+          message: 'The cryptographic transaction was cancelled in your wallet.'
+        });
+        return false;
+      }
+    } else {
+      // Simulated signature delay
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      return true;
+    }
   };
 
   // 1. Instant Buy / Collect Artwork
@@ -226,7 +518,7 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
       addToast({
         type: 'error',
         title: 'Insufficient Funds',
-        message: `You need ${artwork.price} ETH, but current balance is ${wallet.balanceETH.toFixed(2)} ETH.`
+        message: `You need ${artwork.price} ETH, but current balance is ${wallet.balanceETH.toFixed(3)} ETH.`
       });
       return { success: false };
     }
@@ -236,11 +528,18 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setIsTxProcessing(true);
     setActiveTxDetails({
       title: `Collecting "${artwork.title}"`,
-      subtitle: `Signing ERC-721 transfer transaction of ${artwork.price} ETH...`,
+      subtitle: `Please sign the ERC-721 acquisition of ${artwork.price} ETH in ${wallet.walletType || 'your wallet'}...`,
       step: 'signature'
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const signMsg = `ARCVAULT Protocol Acquisition\nArtwork: ${artwork.title}\nToken ID: #${artwork.tokenId}\nPrice: ${artwork.price} ETH\nRecipient: ${wallet.address}\nTimestamp: ${new Date().toISOString()}`;
+    const signed = await requestCryptographicSignature(signMsg);
+
+    if (!signed) {
+      setIsTxProcessing(false);
+      setActiveTxDetails(null);
+      return { success: false };
+    }
 
     setActiveTxDetails({
       title: 'Confirming On-Chain',
@@ -250,8 +549,7 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     await new Promise((resolve) => setTimeout(resolve, 1400));
 
-    // Update wallet balance
-    const newBalance = wallet.balanceETH - artwork.price;
+    const newBalance = Math.max(0, wallet.balanceETH - artwork.price);
     const provRecord: ProvenanceRecord = {
       id: `prov-${Date.now()}`,
       event: 'Sale',
@@ -262,7 +560,6 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
       txHash
     };
 
-    // Update artwork provenance
     setArtworks((prev) =>
       prev.map((item) => {
         if (item.id === artworkId) {
@@ -275,10 +572,9 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
       })
     );
 
-    // Update wallet state
     setWallet((prev) => ({
       ...prev,
-      balanceETH: Number(newBalance.toFixed(3)),
+      balanceETH: Number(newBalance.toFixed(4)),
       balanceUSD: Number((newBalance * ETH_PRICE_USD).toFixed(2)),
       collectedNFTs: [artwork, ...prev.collectedNFTs.filter((n) => n.id !== artwork.id)],
       transactionHistory: [
@@ -295,7 +591,6 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
       ]
     }));
 
-    // Trigger celebration confetti
     confetti({
       particleCount: 80,
       spread: 70,
@@ -349,14 +644,21 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setIsTxProcessing(true);
     setActiveTxDetails({
       title: `Submitting Bid: ${amount} ETH`,
-      subtitle: `Creating cryptographically signed auction bid offer...`,
+      subtitle: `Please sign the auction bid offer in ${wallet.walletType || 'your wallet'}...`,
       step: 'signature'
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 900));
+    const signMsg = `ARCVAULT Protocol Auction Bid\nArtwork: ${artwork.title}\nBid Amount: ${amount} ETH\nBidder: ${wallet.address}\nTimestamp: ${new Date().toISOString()}`;
+    const signed = await requestCryptographicSignature(signMsg);
+
+    if (!signed) {
+      setIsTxProcessing(false);
+      setActiveTxDetails(null);
+      return { success: false };
+    }
 
     setActiveTxDetails({
-      title: 'Verifying Signature',
+      title: 'Registering On-Chain',
       subtitle: 'Registering bid on ARCVAULT Orderbook...',
       step: 'confirming'
     });
@@ -417,7 +719,7 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
     addToast({
       type: 'success',
       title: 'Bid Placed Successfully',
-      message: `You are now the highest bidder at ${amount} ETH!`,
+      message: `You are now the leading bidder at ${amount} ETH!`,
       txHash
     });
 
@@ -452,11 +754,18 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setIsTxProcessing(true);
     setActiveTxDetails({
       title: `Minting ${count} Edition(s) of "${drop.title}"`,
-      subtitle: `Executing ERC-721 Batch Mint (${totalCost.toFixed(2)} ETH)...`,
+      subtitle: `Please sign the ERC-721 Batch Mint in ${wallet.walletType || 'your wallet'}...`,
       step: 'signature'
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 1100));
+    const signMsg = `ARCVAULT Protocol Drop Mint\nDrop: ${drop.title}\nQuantity: ${count}\nTotal: ${totalCost.toFixed(2)} ETH\nMinter: ${wallet.address}\nTimestamp: ${new Date().toISOString()}`;
+    const signed = await requestCryptographicSignature(signMsg);
+
+    if (!signed) {
+      setIsTxProcessing(false);
+      setActiveTxDetails(null);
+      return { success: false };
+    }
 
     setActiveTxDetails({
       title: 'Generating Smart Contract Token ID',
@@ -464,15 +773,13 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
       step: 'confirming'
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await new Promise((resolve) => setTimeout(resolve, 1400));
 
-    // Update drop supply
     const newMintedCount = Math.min(drop.totalEditions, drop.mintedEditions + count);
     setDrops((prev) =>
       prev.map((d) => (d.id === dropId ? { ...d, mintedEditions: newMintedCount } : d))
     );
 
-    // Create minted artwork in user inventory
     const mintedArtworks: NFTArtwork[] = [];
     for (let i = 0; i < count; i++) {
       const editionNum = drop.mintedEditions + i + 1;
@@ -519,10 +826,10 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
       mintedArtworks.push(newArt);
     }
 
-    const newBalance = wallet.balanceETH - totalCost;
+    const newBalance = Math.max(0, wallet.balanceETH - totalCost);
     setWallet((prev) => ({
       ...prev,
-      balanceETH: Number(newBalance.toFixed(3)),
+      balanceETH: Number(newBalance.toFixed(4)),
       balanceUSD: Number((newBalance * ETH_PRICE_USD).toFixed(2)),
       collectedNFTs: [...mintedArtworks, ...prev.collectedNFTs],
       transactionHistory: [
@@ -541,7 +848,6 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     setArtworks((prev) => [...mintedArtworks, ...prev]);
 
-    // Confetti!
     confetti({
       particleCount: 120,
       spread: 90,
@@ -587,11 +893,18 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setIsTxProcessing(true);
     setActiveTxDetails({
       title: `Deploying "${artworkData.title}" on-chain`,
-      subtitle: 'Uploading metadata & media to IPFS node pinning service...',
+      subtitle: `Please sign the ERC-721 Deployment in ${wallet.walletType || 'your wallet'}...`,
       step: 'signature'
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 1100));
+    const signMsg = `ARCVAULT Protocol Contract Deployment\nTitle: ${artworkData.title}\nEditions: ${artworkData.totalEditions}\nPrice: ${artworkData.price} ETH\nCreator: ${wallet.address}\nTimestamp: ${new Date().toISOString()}`;
+    const signed = await requestCryptographicSignature(signMsg);
+
+    if (!signed) {
+      setIsTxProcessing(false);
+      setActiveTxDetails(null);
+      return { success: false, artworkId: '', txHash: '' };
+    }
 
     setActiveTxDetails({
       title: 'Writing to Smart Contract',
@@ -724,7 +1037,8 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
         placeBid,
         mintDrop,
         createArtworkInStudio,
-        dismissToast
+        dismissToast,
+        isExtensionDetected
       }}
     >
       {children}
